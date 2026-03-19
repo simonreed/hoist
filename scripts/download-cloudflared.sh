@@ -21,12 +21,6 @@ case "${OS}-${ARCH}" in
     tar -xzf "${TMPDIR_LOCAL}/cf.tgz" -C "${TMPDIR_LOCAL}"
     cp "${TMPDIR_LOCAL}/cloudflared" vendor/cloudflared
     ;;
-  Darwin-x86_64)
-    echo "Downloading cloudflared (latest) for Darwin x86_64..."
-    curl -fsSL "${BASE}/cloudflared-darwin-amd64.tgz" -o "${TMPDIR_LOCAL}/cf.tgz"
-    tar -xzf "${TMPDIR_LOCAL}/cf.tgz" -C "${TMPDIR_LOCAL}"
-    cp "${TMPDIR_LOCAL}/cloudflared" vendor/cloudflared
-    ;;
   Linux-x86_64)
     echo "Downloading cloudflared (latest) for Linux x86_64..."
     curl -fsSL "${BASE}/cloudflared-linux-amd64" -o vendor/cloudflared

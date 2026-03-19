@@ -12,8 +12,6 @@ jobs:
         include:
           - os: macos-latest
             name: hoist-darwin-arm64
-          - os: macos-13
-            name: hoist-darwin-x86_64
           - os: ubuntu-latest
             name: hoist-linux-x86_64
 

@@ -13,7 +13,6 @@ ARCH=$(uname -m)
 
 case "${OS}-${ARCH}" in
   Darwin-arm64)  FILE="hoist-darwin-arm64" ;;
-  Darwin-x86_64) FILE="hoist-darwin-x86_64" ;;
   Linux-x86_64)  FILE="hoist-linux-x86_64" ;;
   *)
     echo "Unsupported platform: ${OS}-${ARCH}" >&2
