@@ -1,0 +1,11 @@
+{
+  "name": "hoist",
+  "version": "0.1.0",
+  "type": "module",
+  "bin": {
+    "hoist": "./src/cli.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

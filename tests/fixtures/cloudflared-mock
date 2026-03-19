@@ -1,0 +1,128 @@
+#!/usr/bin/env node
+// Mock cloudflared binary for integration tests.
+// Controlled via MOCK_CF_MODE env var:
+//   success (default) — all calls succeed
+//   dns-conflict       — tunnel route dns returns non-zero, no "already"/"exists" in output
+//   dns-exists         — tunnel route dns returns non-zero with "already exists"
+//   login-timeout      — tunnel login hangs for 15s then exits 1
+//   tunnel-run-crash   — tunnel run exits immediately with non-zero
+//   tunnel-run-slow    — tunnel run logs connection then blocks (normal happy path)
+//   no-tunnels         — tunnel list returns empty array
+
+const mode = process.env.MOCK_CF_MODE || "success";
+const args = process.argv.slice(2);
+const sub = args[0]; // "tunnel"
+const cmd = args[1]; // "login" | "create" | "list" | "route" | "run"
+
+function log(msg) {
+  process.stderr.write(msg + "\n");
+}
+
+if (sub !== "tunnel") {
+  process.stderr.write(`cloudflared-mock: unknown command ${sub}\n`);
+  process.exit(1);
+}
+
+switch (cmd) {
+  case "login": {
+    if (mode === "login-timeout") {
+      setTimeout(() => {
+        process.stderr.write("cloudflared-mock: login timed out\n");
+        process.exit(1);
+      }, 15000);
+    } else {
+      // Write a dummy cert
+      const certPath = args[args.indexOf("--origincert") + 1] || `${process.env.HOME}/.cloudflared/cert.pem`;
+      const fs = require("fs");
+      const path = require("path");
+      fs.mkdirSync(path.dirname(certPath), { recursive: true });
+      fs.writeFileSync(certPath, "MOCK CERT\n");
+      process.stderr.write("You have successfully logged in.\n");
+      process.exit(0);
+    }
+    break;
+  }
+
+  case "create": {
+    const tunnelName = args[2];
+    const credsFlag = args.indexOf("--credentials-file");
+    const credsPath = credsFlag !== -1 ? args[credsFlag + 1] : `${process.env.HOME}/.cloudflared/mock-tunnel-id.json`;
+    const fs = require("fs");
+    const path = require("path");
+    fs.mkdirSync(path.dirname(credsPath), { recursive: true });
+    fs.writeFileSync(credsPath, JSON.stringify({ AccountTag: "mock", TunnelID: "mock-tunnel-id", TunnelName: tunnelName }));
+    process.stderr.write(`Created tunnel ${tunnelName} with id mock-tunnel-id\n`);
+    process.exit(0);
+    break;
+  }
+
+  case "list": {
+    if (mode === "no-tunnels") {
+      process.stdout.write(JSON.stringify([]));
+      process.exit(0);
+    }
+    process.stdout.write(JSON.stringify([
+      { id: "mock-tunnel-id", name: "hoist-dev", created_at: "2026-01-01T00:00:00Z" }
+    ]));
+    process.exit(0);
+    break;
+  }
+
+  case "route": {
+    // args: tunnel route dns <tunnel-name> <hostname>
+    if (mode === "dns-conflict") {
+      process.stderr.write("Failed to create DNS record: record already exists with a different value\n");
+      process.exit(1);
+    }
+    if (mode === "dns-exists") {
+      process.stderr.write("A DNS record already exists for this hostname\n");
+      process.exit(1);
+    }
+    process.stderr.write(`Added CNAME ${args[4]} routing to tunnel mock-tunnel-id\n`);
+    process.exit(0);
+    break;
+  }
+
+  case "run": {
+    if (mode === "tunnel-run-crash") {
+      process.stderr.write("cloudflared-mock: tunnel run failed\n");
+      process.exit(1);
+    }
+    // Emit realistic debug log lines then block
+    const hostname = process.env.MOCK_CF_HOSTNAME || "passflow.simonreed.co";
+    const port = process.env.MOCK_CF_PORT || "5555";
+    process.stderr.write("2026-01-01T00:00:01Z INF Registered tunnel connection connIndex=0 location=lhr01\n");
+
+    // Simulate requests if MOCK_CF_REQUESTS is set
+    if (process.env.MOCK_CF_REQUESTS) {
+      const requests = JSON.parse(process.env.MOCK_CF_REQUESTS);
+      let delay = 500;
+      for (const req of requests) {
+        setTimeout(() => {
+          process.stderr.write(
+            `2026-01-01T00:00:02Z DBG ${req.method} https://${hostname}${req.path} HTTP/1.1 connIndex=0 ` +
+            `content-length=0 event=1 headers={} host=${hostname} ingressRule=0 ` +
+            `originService=http://localhost:${port} path=${req.path}\n`
+          );
+          setTimeout(() => {
+            process.stderr.write(
+              `2026-01-01T00:00:02Z DBG ${req.status} OK connIndex=0 content-length=-1 event=1 ` +
+              `ingressRule=0 originService=http://localhost:${port}\n`
+            );
+          }, 50);
+        }, delay);
+        delay += 200;
+      }
+    }
+
+    // Block until killed
+    process.on("SIGTERM", () => process.exit(0));
+    setInterval(() => {}, 60000);
+    break;
+  }
+
+  default: {
+    process.stderr.write(`cloudflared-mock: unknown tunnel subcommand ${cmd}\n`);
+    process.exit(1);
+  }
+}
