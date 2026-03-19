@@ -1,63 +1,38 @@
 # hoist
 
-Expose local ports as HTTPS subdomains on your own domain. A focused replacement for ngrok that runs on Cloudflare Tunnels.
+Expose local ports as HTTPS subdomains on your own domain. A focused alternative to ngrok built on Cloudflare Tunnels.
 
-```
-hoist passflow 5555
-hoist assay 3000
-hoist membercanoe 3009
+```sh
+hoist myapp 3000
+hoist api 8080
+hoist docs 4000
 ```
 
 All three run simultaneously over a single tunnel, each on your own domain.
 
 ---
 
-## Why
+## Why not ngrok
 
-ngrok works but has two problems: you're on ngrok's domain, and the free tier limits you to one tunnel at a time. Hoist uses Cloudflare Tunnels — one background process, unlimited named subdomains, your own domain, ~40% lower latency.
+ngrok's free tier locks you to ngrok's own domain. Custom domains require a paid plan. hoist uses Cloudflare Tunnels — one background process, any number of named subdomains, your own domain, no per-tunnel fees.
 
-## How it works
+## Install
 
-- One named Cloudflare Tunnel runs in the background
-- Each `hoist <subdomain> <port>` call registers a DNS record and updates the tunnel's ingress config
-- All subdomains route through the same tunnel process — no per-subdomain processes
-- State lives at `~/.hoist/state.json`; tunnel config at `~/.cloudflared/config.yml`
+```sh
+curl -fsSL https://hoist.sh | sh
+```
+
+Single binary. cloudflared is embedded — no separate install required.
 
 ## Setup
 
-### 1. Install cloudflared
+Your domain must be on [Cloudflare DNS](https://developers.cloudflare.com/dns/). Run once:
 
 ```sh
-brew install cloudflared
+hoist init yourdomain.com
 ```
 
-### 2. Authenticate
-
-```sh
-cloudflared tunnel login
-```
-
-Opens a browser. Authorise your Cloudflare account. Certificate is written to `~/.cloudflared/cert.pem`.
-
-Your domain must be on Cloudflare DNS.
-
-### 3. Create a tunnel
-
-```sh
-cloudflared tunnel create my-tunnel
-```
-
-### 4. Install hoist
-
-```sh
-npm install -g hoist   # or: npm link from the repo
-```
-
-### 5. Initialise
-
-```sh
-hoist init simonreed.co my-tunnel
-```
+This handles Cloudflare login, tunnel creation, and local config in one step.
 
 ---
 
@@ -67,22 +42,39 @@ hoist init simonreed.co my-tunnel
 hoist <subdomain> <port>    # expose localhost:<port> at https://<subdomain>.<domain>
 hoist rm <subdomain>        # remove a mapping
 hoist ls                    # list active mappings and tunnel status
-hoist watch                 # live request view (method, path, status)
 hoist stop                  # stop the tunnel process
-hoist run                   # run tunnel in foreground (debugging)
 hoist status                # show tunnel ID, config paths, process state
-hoist init <domain> <name>  # one-time setup
+hoist init <domain>         # one-time setup (login + tunnel + config)
 ```
 
-Running `hoist <subdomain> <port>` starts the tunnel and immediately opens the live request view. Ctrl-C stops the tunnel.
+Running `hoist <subdomain> <port>` again with a different port updates the mapping in place.
 
-Running a subdomain a second time with a different port updates the mapping in-place.
+---
+
+## How it works
+
+- One named Cloudflare Tunnel runs in the background
+- Each `hoist <subdomain> <port>` registers a DNS record and updates the tunnel's ingress config
+- All subdomains route through the same process — no per-subdomain processes
+- State: `~/.hoist/state.json` · Tunnel config: `~/.cloudflared/config.yml`
+- On first run, the embedded cloudflared binary is extracted to `~/.hoist/cloudflared`
 
 ---
 
 ## Requirements
 
-- macOS (Linux untested but should work)
-- Node.js >= 18
-- `cloudflared` installed and authenticated
-- Domain on Cloudflare DNS
+- macOS (arm64 or x86_64) or Linux (x86_64)
+- A domain on [Cloudflare DNS](https://developers.cloudflare.com/dns/)
+
+---
+
+## Build from source
+
+Requires [Bun](https://bun.sh).
+
+```sh
+git clone https://github.com/simonreed/hoist
+cd hoist
+bun run download-cloudflared   # fetch cloudflared for your platform
+bun run build                  # outputs dist/hoist
+```
