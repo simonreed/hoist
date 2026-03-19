@@ -143,7 +143,7 @@
     <p class="tagline">Expose localhost over HTTPS on your own domain. No account. No limits.</p>
 
     <div class="install-block">
-      <code>curl -fsSL https://hoist.sh | sh</code>
+      <code>curl -fsSL https://raw.githubusercontent.com/simonreed/hoist/master/scripts/install.sh | sh</code>
       <button class="copy-btn" onclick="copy(this)">Copy</button>
     </div>
 
@@ -184,7 +184,7 @@
 
   <script>
     function copy(btn) {
-      navigator.clipboard.writeText("curl -fsSL https://hoist.sh | sh").then(() => {
+      navigator.clipboard.writeText("curl -fsSL https://raw.githubusercontent.com/simonreed/hoist/master/scripts/install.sh | sh").then(() => {
         btn.textContent = "Copied!";
         setTimeout(() => { btn.textContent = "Copy"; }, 2000);
       });

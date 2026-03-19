@@ -1,6 +1,6 @@
 #!/bin/sh
 # hoist installer
-# Usage: curl -fsSL https://hoist.sh | sh
+# Usage: curl -fsSL https://raw.githubusercontent.com/simonreed/hoist/master/scripts/install.sh | sh
 
 set -e
 

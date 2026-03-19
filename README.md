@@ -19,7 +19,7 @@ ngrok's free tier locks you to ngrok's own domain. Custom domains require a paid
 ## Install
 
 ```sh
-curl -fsSL https://hoist.sh | sh
+curl -fsSL https://raw.githubusercontent.com/simonreed/hoist/master/scripts/install.sh | sh
 ```
 
 Single binary. cloudflared is embedded — no separate install required.
