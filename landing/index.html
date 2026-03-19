@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>hoist — expose localhost over HTTPS in one command</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #0d1117;
+      color: #e6edf3;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 2rem;
+    }
+
+    main {
+      max-width: 640px;
+      width: 100%;
+    }
+
+    h1 {
+      font-size: 2.5rem;
+      font-weight: 700;
+      letter-spacing: -0.03em;
+      margin-bottom: 0.5rem;
+    }
+
+    h1 span {
+      color: #f78166;
+    }
+
+    .tagline {
+      color: #8b949e;
+      font-size: 1.125rem;
+      margin-bottom: 3rem;
+    }
+
+    .install-block {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      padding: 1.25rem 1.5rem;
+      margin-bottom: 3rem;
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+    }
+
+    .install-block code {
+      font-family: "SF Mono", "Cascadia Code", "Fira Code", Menlo, monospace;
+      font-size: 0.9rem;
+      color: #79c0ff;
+      flex: 1;
+    }
+
+    .copy-btn {
+      background: none;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      color: #8b949e;
+      cursor: pointer;
+      font-size: 0.75rem;
+      padding: 0.35rem 0.75rem;
+      white-space: nowrap;
+      transition: border-color 0.15s, color 0.15s;
+    }
+
+    .copy-btn:hover {
+      border-color: #58a6ff;
+      color: #58a6ff;
+    }
+
+    .steps {
+      display: flex;
+      flex-direction: column;
+      gap: 1.5rem;
+      margin-bottom: 3rem;
+    }
+
+    .step {
+      display: flex;
+      gap: 1rem;
+    }
+
+    .step-num {
+      color: #f78166;
+      font-family: "SF Mono", Menlo, monospace;
+      font-size: 0.85rem;
+      font-weight: 600;
+      min-width: 1.5rem;
+      padding-top: 0.05rem;
+    }
+
+    .step-body h3 {
+      font-size: 0.95rem;
+      font-weight: 600;
+      margin-bottom: 0.25rem;
+    }
+
+    .step-body p {
+      color: #8b949e;
+      font-size: 0.875rem;
+      line-height: 1.5;
+      margin-bottom: 0.5rem;
+    }
+
+    .step-body code {
+      display: block;
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      color: #79c0ff;
+      font-family: "SF Mono", Menlo, monospace;
+      font-size: 0.825rem;
+      padding: 0.6rem 0.875rem;
+    }
+
+    footer {
+      color: #484f58;
+      font-size: 0.8rem;
+      text-align: center;
+    }
+
+    footer a {
+      color: #58a6ff;
+      text-decoration: none;
+    }
+
+    footer a:hover {
+      text-decoration: underline;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>hoist<span>.</span></h1>
+    <p class="tagline">Expose localhost over HTTPS on your own domain. No account. No limits.</p>
+
+    <div class="install-block">
+      <code>curl -fsSL https://hoist.sh | sh</code>
+      <button class="copy-btn" onclick="copy(this)">Copy</button>
+    </div>
+
+    <div class="steps">
+      <div class="step">
+        <div class="step-num">01</div>
+        <div class="step-body">
+          <h3>Connect your domain</h3>
+          <p>Authenticate with Cloudflare and set up your tunnel — one command does all three steps.</p>
+          <code>hoist init yourdomain.com</code>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="step-num">02</div>
+        <div class="step-body">
+          <h3>Expose a local port</h3>
+          <p>Pick a subdomain and a port. hoist creates the DNS record and starts the tunnel.</p>
+          <code>hoist myapp 3000</code>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="step-num">03</div>
+        <div class="step-body">
+          <h3>Share the URL</h3>
+          <p>Your app is live at <code style="display:inline; background:none; border:none; padding:0; color:#3fb950;">https://myapp.yourdomain.com</code> — HTTPS, no port forwarding, no firewall rules.</p>
+        </div>
+      </div>
+    </div>
+
+    <footer>
+      <a href="https://github.com/simonreed/hoist">GitHub</a>
+      &nbsp;&middot;&nbsp;
+      Built on <a href="https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/">Cloudflare Tunnels</a>
+    </footer>
+  </main>
+
+  <script>
+    function copy(btn) {
+      navigator.clipboard.writeText("curl -fsSL https://hoist.sh | sh").then(() => {
+        btn.textContent = "Copied!";
+        setTimeout(() => { btn.textContent = "Copy"; }, 2000);
+      });
+    }
+  </script>
+</body>
+</html>

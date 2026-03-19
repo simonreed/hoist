@@ -1,0 +1,30 @@
+name: Deploy landing
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "landing/**"
+      - "scripts/install.sh"
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Copy install.sh into landing
+        run: cp scripts/install.sh landing/install.sh
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - run: npm install
+        working-directory: landing
+
+      - run: npm run deploy
+        working-directory: landing
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
