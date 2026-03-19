@@ -7,6 +7,9 @@
   },
   "scripts": {
     "test": "bun test",
+    "pretest": "sh scripts/setup.sh",
+    "setup": "sh scripts/setup.sh",
+    "download-cloudflared": "sh scripts/download-cloudflared.sh",
     "build": "bun build --compile --minify src/cli.ts --outfile dist/hoist"
   },
   "engines": {

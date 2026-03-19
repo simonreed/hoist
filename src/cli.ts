@@ -7,15 +7,21 @@ import {
   existsSync,
   unlinkSync,
   openSync,
+  chmodSync,
 } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { spawnSync, spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 
+// Embedded cloudflared binary. Populated by vendor/cloudflared at build time.
+// In dev/test mode this is the stub created by scripts/setup.sh — real content
+// is detected at runtime via magic bytes and skipped if not a real binary.
+import embeddedCf from "../vendor/cloudflared" with { type: "file" };
+
 // ── Paths ─────────────────────────────────────────────────────────────────────
 // HOIST_DIR overrides ~/.hoist for isolated test runs
-// CLOUDFLARED_BIN overrides the cloudflared binary path (use mock in tests)
+// CLOUDFLARED_BIN overrides the cloudflared binary path (used in tests)
 // HOIST_TEST_MODE=1 skips the watch view after starting a tunnel
 
 const APP_DIR = process.env.HOIST_DIR ?? join(homedir(), ".hoist");
@@ -23,8 +29,10 @@ const STATE_FILE = join(APP_DIR, "state.json");
 const PID_FILE = join(APP_DIR, "cloudflared.pid");
 const LOG_FILE = join(APP_DIR, "cloudflared.log");
 const CONFIG_FILE = join(APP_DIR, "config.yml");
-const CLOUDFLARED = process.env.CLOUDFLARED_BIN ?? "cloudflared";
 const TEST_MODE = process.env.HOIST_TEST_MODE === "1";
+
+// Set at startup by resolveCloudflared() — do not use before entry point runs
+let CLOUDFLARED = "cloudflared";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -43,6 +51,61 @@ interface State {
 type LogEvent =
   | { type: "req"; time: string; method: string; host: string; path: string }
   | { type: "res"; time: string; status: number };
+
+// ── Cloudflared binary resolution ─────────────────────────────────────────────
+
+// Returns true if buf starts with a known native executable magic number.
+// Used to distinguish the real cloudflared binary from the dev stub.
+function isNativeBinary(buf: Buffer): boolean {
+  if (buf.length < 4) return false;
+  const b0 = buf[0]!, b1 = buf[1]!, b2 = buf[2]!, b3 = buf[3]!;
+  // ELF (Linux)
+  if (b0 === 0x7f && b1 === 0x45 && b2 === 0x4c && b3 === 0x46) return true;
+  // Use >>> 0 to force unsigned 32-bit comparison (JS bitwise ops return signed int32)
+  const magic = ((b0 << 24) | (b1 << 16) | (b2 << 8) | b3) >>> 0;
+  // Mach-O 64-bit: 0xFEEDFACF (big-endian) or 0xCFFAEDFE (little-endian / arm64)
+  if (magic === 0xfeedfacf || magic === 0xcffaedfe) return true;
+  // Mach-O universal/fat binary
+  if (magic === 0xcafebabe || magic === 0xcafebabf) return true;
+  return false;
+}
+
+// Resolves the cloudflared binary to use, in priority order:
+//   1. CLOUDFLARED_BIN env var  (tests / manual override)
+//   2. Already-extracted binary at $APP_DIR/cloudflared
+//   3. Embedded real binary     (compiled standalone executable)
+//   4. System cloudflared in PATH
+function resolveCloudflared(): string {
+  if (process.env.CLOUDFLARED_BIN) return process.env.CLOUDFLARED_BIN;
+
+  const extracted = join(APP_DIR, "cloudflared");
+  if (existsSync(extracted)) return extracted;
+
+  // Check whether the embedded file is a real binary (not the dev stub)
+  try {
+    const data = readFileSync(embeddedCf);
+    if (isNativeBinary(data)) {
+      mkdirSync(APP_DIR, { recursive: true });
+      writeFileSync(extracted, data);
+      chmodSync(extracted, 0o755);
+      console.error(`hoist: extracted cloudflared to ${extracted}`);
+      return extracted;
+    }
+  } catch {
+    // embedded file unreadable — fall through
+  }
+
+  // Fall back to system cloudflared
+  const which = spawnSync("which", ["cloudflared"], { encoding: "utf8" });
+  if (which.status === 0) return "cloudflared";
+
+  console.error(
+    "cloudflared not found.\n" +
+    "  Option 1: Download the standalone hoist binary (includes cloudflared)\n" +
+    "  Option 2: brew install cloudflared"
+  );
+  process.exit(1);
+}
 
 // ── State ─────────────────────────────────────────────────────────────────────
 
@@ -67,7 +130,7 @@ function requireState(): State {
 
 // ── Cloudflared config ────────────────────────────────────────────────────────
 
-function buildConfigYaml(state: State): string {
+export function buildConfigYaml(state: State): string {
   const credentialsFile = join(APP_DIR, `${state.tunnelId}.json`);
   if (state.mappings.length === 0) {
     return `tunnel: ${state.tunnelId}
@@ -97,15 +160,6 @@ function writeConfig(state: State): void {
 }
 
 // ── DNS ───────────────────────────────────────────────────────────────────────
-
-function requireCloudflared(): void {
-  if (process.env.CLOUDFLARED_BIN) return; // test mode — mock provided directly
-  const result = spawnSync("which", ["cloudflared"], { encoding: "utf8" });
-  if (result.status !== 0) {
-    console.error("cloudflared not found. Install: brew install cloudflared");
-    process.exit(1);
-  }
-}
 
 function ensureDns(state: State, subdomain: string): void {
   const hostname = `${subdomain}.${state.domain}`;
@@ -168,8 +222,6 @@ function stopTunnel(): boolean {
 }
 
 function startTunnel(state: State): number {
-  requireCloudflared();
-
   stopTunnel();
   if (!TEST_MODE) spawnSync("sleep", ["0.5"]);
 
@@ -259,23 +311,19 @@ export function parseLogLine(line: string): LogEvent | null {
     return {
       type: "req",
       time,
-      method: reqMatch[1],
-      host: reqMatch[2],
+      method: reqMatch[1]!,
+      host: reqMatch[2]!,
       path: reqMatch[3] ?? "/",
     };
   }
 
   const resMatch = rest.match(/^(\d{3})\s+\S+/);
   if (resMatch) {
-    return { type: "res", time, status: parseInt(resMatch[1], 10) };
+    return { type: "res", time, status: parseInt(resMatch[1]!, 10) };
   }
 
   return null;
 }
-
-// ── Config YAML builder (exported for unit tests) ─────────────────────────────
-
-export { buildConfigYaml };
 
 // ── Display ───────────────────────────────────────────────────────────────────
 
@@ -319,7 +367,6 @@ function cmdInit(args: string[]): void {
     process.exit(1);
   }
 
-  requireCloudflared();
   process.stdout.write(`Looking up tunnel "${tunnelName}" ... `);
   const tunnelId = resolveTunnelId(tunnelName);
   console.log(`found (${tunnelId.slice(0, 8)}...)`);
@@ -542,6 +589,8 @@ hoist init <domain> <name> one-time setup with your Cloudflare tunnel`);
 // ── Entry point ───────────────────────────────────────────────────────────────
 
 if (import.meta.main) {
+  CLOUDFLARED = resolveCloudflared();
+
   const [first, ...rest] = process.argv.slice(2);
 
   const COMMANDS = new Set([
