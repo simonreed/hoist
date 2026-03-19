@@ -1,22 +1,22 @@
 #!/usr/bin/env node
 // Mock cloudflared binary for integration tests.
 // Controlled via MOCK_CF_MODE env var:
-//   success (default) — all calls succeed
-//   dns-conflict       — tunnel route dns returns non-zero, no "already"/"exists" in output
-//   dns-exists         — tunnel route dns returns non-zero with "already exists"
-//   login-timeout      — tunnel login hangs for 15s then exits 1
-//   tunnel-run-crash   — tunnel run exits immediately with non-zero
-//   tunnel-run-slow    — tunnel run logs connection then blocks (normal happy path)
-//   no-tunnels         — tunnel list returns empty array
+//   success (default)    — all calls succeed
+//   dns-conflict         — tunnel route dns returns non-zero, no "already"/"exists" in output
+//   dns-exists           — tunnel route dns returns non-zero with "already exists"
+//   login-timeout        — tunnel login hangs for 15s then exits 1
+//   login-fail           — tunnel login exits 1 immediately
+//   tunnel-create-fails  — tunnel create exits 1
+//   tunnel-run-crash     — tunnel run exits immediately with non-zero
+//   no-tunnels           — tunnel list returns empty array
+
+import fs from "node:fs";
+import path from "node:path";
 
 const mode = process.env.MOCK_CF_MODE || "success";
 const args = process.argv.slice(2);
 const sub = args[0]; // "tunnel"
 const cmd = args[1]; // "login" | "create" | "list" | "route" | "run"
-
-function log(msg) {
-  process.stderr.write(msg + "\n");
-}
 
 if (sub !== "tunnel") {
   process.stderr.write(`cloudflared-mock: unknown command ${sub}\n`);
@@ -30,11 +30,15 @@ switch (cmd) {
         process.stderr.write("cloudflared-mock: login timed out\n");
         process.exit(1);
       }, 15000);
+    } else if (mode === "login-fail") {
+      process.stderr.write("cloudflared-mock: login failed\n");
+      process.exit(1);
     } else {
-      // Write a dummy cert
-      const certPath = args[args.indexOf("--origincert") + 1] || `${process.env.HOME}/.cloudflared/cert.pem`;
-      const fs = require("fs");
-      const path = require("path");
+      // Write cert to HOIST_DIR (for test isolation) or ~/.cloudflared/cert.pem
+      const defaultCert = process.env.HOIST_DIR
+        ? path.join(process.env.HOIST_DIR, "cert.pem")
+        : path.join(process.env.HOME, ".cloudflared", "cert.pem");
+      const certPath = args[args.indexOf("--origincert") + 1] || defaultCert;
       fs.mkdirSync(path.dirname(certPath), { recursive: true });
       fs.writeFileSync(certPath, "MOCK CERT\n");
       process.stderr.write("You have successfully logged in.\n");
@@ -44,11 +48,16 @@ switch (cmd) {
   }
 
   case "create": {
+    if (mode === "tunnel-create-fails") {
+      process.stderr.write("cloudflared-mock: tunnel create failed\n");
+      process.exit(1);
+    }
     const tunnelName = args[2];
     const credsFlag = args.indexOf("--credentials-file");
-    const credsPath = credsFlag !== -1 ? args[credsFlag + 1] : `${process.env.HOME}/.cloudflared/mock-tunnel-id.json`;
-    const fs = require("fs");
-    const path = require("path");
+    const defaultCreds = process.env.HOIST_DIR
+      ? path.join(process.env.HOIST_DIR, "mock-tunnel-id.json")
+      : path.join(process.env.HOME, ".cloudflared", "mock-tunnel-id.json");
+    const credsPath = credsFlag !== -1 ? args[credsFlag + 1] : defaultCreds;
     fs.mkdirSync(path.dirname(credsPath), { recursive: true });
     fs.writeFileSync(credsPath, JSON.stringify({ AccountTag: "mock", TunnelID: "mock-tunnel-id", TunnelName: tunnelName }));
     process.stderr.write(`Created tunnel ${tunnelName} with id mock-tunnel-id\n`);
@@ -57,7 +66,7 @@ switch (cmd) {
   }
 
   case "list": {
-    if (mode === "no-tunnels") {
+    if (mode === "no-tunnels" || mode === "tunnel-create-fails") {
       process.stdout.write(JSON.stringify([]));
       process.exit(0);
     }

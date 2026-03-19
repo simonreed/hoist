@@ -6,6 +6,7 @@ import {
   writeFileSync,
   existsSync,
   unlinkSync,
+  renameSync,
   openSync,
   chmodSync,
 } from "node:fs";
@@ -256,42 +257,6 @@ interface TunnelInfo {
   name: string;
 }
 
-function resolveTunnelId(tunnelName: string): string {
-  const result = spawnSync(
-    CLOUDFLARED,
-    ["tunnel", "list", "--output", "json"],
-    { encoding: "utf8" }
-  );
-
-  if ((result.error as NodeJS.ErrnoException)?.code === "ENOENT") {
-    console.error("cloudflared not found. Install: brew install cloudflared");
-    process.exit(1);
-  }
-
-  if (result.status !== 0) {
-    console.error("Failed to list tunnels. Have you run: cloudflared tunnel login?");
-    console.error(result.stderr || result.stdout);
-    process.exit(1);
-  }
-
-  let tunnels: TunnelInfo[];
-  try {
-    tunnels = JSON.parse(result.stdout) as TunnelInfo[];
-  } catch {
-    console.error("Could not parse cloudflared tunnel list output.");
-    process.exit(1);
-  }
-
-  const tunnel = tunnels.find((t) => t.name === tunnelName || t.id === tunnelName);
-  if (!tunnel) {
-    const names = tunnels.map((t) => t.name).join(", ");
-    console.error(`Tunnel "${tunnelName}" not found. Available: ${names}`);
-    process.exit(1);
-  }
-
-  return tunnel.id;
-}
-
 // ── Log parsing ───────────────────────────────────────────────────────────────
 
 // Parses a cloudflared debug log line into a request or response event.
@@ -360,23 +325,92 @@ function renderHeader(state: State): void {
 
 // ── Commands ──────────────────────────────────────────────────────────────────
 
-function cmdInit(args: string[]): void {
-  const [domain, tunnelName] = args;
-  if (!domain || !tunnelName) {
-    console.error("Usage: hoist init <domain> <tunnel-name>");
+// Creates a new tunnel, writes credentials to APP_DIR/<tunnelId>.json,
+// and returns the tunnel ID.
+function createTunnel(tunnelName: string): string {
+  const tmpCredFile = join(APP_DIR, "creds-tmp.json");
+  mkdirSync(APP_DIR, { recursive: true });
+
+  const result = spawnSync(
+    CLOUDFLARED,
+    ["tunnel", "create", tunnelName, "--credentials-file", tmpCredFile],
+    { encoding: "utf8" }
+  );
+
+  if (result.status !== 0) {
+    console.error(`Failed to create tunnel "${tunnelName}".`);
+    console.error(result.stderr || result.stdout);
     process.exit(1);
   }
 
-  process.stdout.write(`Looking up tunnel "${tunnelName}" ... `);
-  const tunnelId = resolveTunnelId(tunnelName);
-  console.log(`found (${tunnelId.slice(0, 8)}...)`);
+  const creds = JSON.parse(readFileSync(tmpCredFile, "utf8")) as {
+    TunnelID?: string;
+    tunnelID?: string;
+    id?: string;
+  };
+  const tunnelId = (creds.TunnelID ?? creds.tunnelID ?? creds.id)!;
 
+  // Rename to <tunnelId>.json so buildConfigYaml can find it
+  renameSync(tmpCredFile, join(APP_DIR, `${tunnelId}.json`));
+  return tunnelId;
+}
+
+function cmdInit(args: string[]): void {
+  const [domain, tunnelName = "hoist"] = args;
+  if (!domain) {
+    console.error("Usage: hoist init <domain> [tunnel-name]");
+    process.exit(1);
+  }
+
+  // Step 1: Cloudflare login
+  console.log("Step 1/3: Cloudflare login");
+  const loginResult = spawnSync(
+    CLOUDFLARED,
+    ["tunnel", "login"],
+    { stdio: "inherit" }
+  );
+  if (loginResult.status !== 0) {
+    console.error("Login failed.");
+    process.exit(1);
+  }
+
+  // Step 2: Find or create the tunnel
+  console.log(`\nStep 2/3: Setting up tunnel "${tunnelName}"`);
+  let tunnelId: string;
+
+  const listResult = spawnSync(
+    CLOUDFLARED,
+    ["tunnel", "list", "--output", "json"],
+    { encoding: "utf8" }
+  );
+
+  if (listResult.status === 0) {
+    const tunnels = JSON.parse(listResult.stdout) as TunnelInfo[];
+    const existing = tunnels.find((t) => t.name === tunnelName);
+    if (existing) {
+      tunnelId = existing.id;
+      console.log(`  Using existing tunnel: ${tunnelId.slice(0, 8)}...`);
+    } else {
+      console.log(`  Creating tunnel "${tunnelName}"...`);
+      tunnelId = createTunnel(tunnelName);
+      console.log(`  Created: ${tunnelId.slice(0, 8)}...`);
+    }
+  } else {
+    console.log(`  Creating tunnel "${tunnelName}"...`);
+    tunnelId = createTunnel(tunnelName);
+    console.log(`  Created: ${tunnelId.slice(0, 8)}...`);
+  }
+
+  // Step 3: Save config
+  console.log("\nStep 3/3: Saving configuration");
   const state: State = { domain, tunnelName, tunnelId, mappings: [] };
   saveState(state);
   writeConfig(state);
 
-  console.log(`\nReady. Tunnel: ${tunnelName} on ${domain}`);
-  console.log("Next: hoist <subdomain> <port>");
+  console.log(`\nReady!`);
+  console.log(`  Tunnel: ${tunnelName} (${tunnelId.slice(0, 8)}...)`);
+  console.log(`  Domain: ${domain}`);
+  console.log("\nNext: hoist <subdomain> <port>");
 }
 
 function cmdShare(args: (string | undefined)[]): void {
@@ -583,7 +617,7 @@ hoist stop                 stop the tunnel process
 hoist run                  run tunnel in foreground (for debugging)
 hoist watch                live request view with tunnel header (like ngrok)
 hoist logs                 plain request log tail
-hoist init <domain> <name> one-time setup with your Cloudflare tunnel`);
+hoist init <domain>         one-time setup: login + create tunnel + configure`);
 }
 
 // ── Entry point ───────────────────────────────────────────────────────────────

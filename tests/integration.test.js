@@ -102,14 +102,32 @@ describe("hoist with no state", () => {
 // ── init ──────────────────────────────────────────────────────────────────────
 
 describe("hoist init", () => {
-  test("creates state.json with correct structure", () => {
-    const result = runCli(["init", "simonreed.co", "hoist-dev"], { hoistDir });
+  test("simplified: domain only uses default tunnel name 'hoist'", () => {
+    // Mock list returns only "hoist-dev", so "hoist" is not found → creates it
+    const result = runCli(["init", "simonreed.co"], { hoistDir });
     expect(result.status).toBe(0);
     const state = readState(hoistDir);
     expect(state.domain).toBe("simonreed.co");
-    expect(state.tunnelName).toBe("hoist-dev");
+    expect(state.tunnelName).toBe("hoist");
     expect(state.tunnelId).toBe("mock-tunnel-id");
     expect(state.mappings).toEqual([]);
+  });
+
+  test("uses existing tunnel when name matches list", () => {
+    // Mock list returns "hoist-dev" → no create needed
+    const result = runCli(["init", "simonreed.co", "hoist-dev"], { hoistDir });
+    expect(result.status).toBe(0);
+    const state = readState(hoistDir);
+    expect(state.tunnelName).toBe("hoist-dev");
+    expect(state.tunnelId).toBe("mock-tunnel-id");
+  });
+
+  test("creates new tunnel when not in list", () => {
+    // Mock list returns [] (no-tunnels) → creates "hoist"
+    const result = runCli(["init", "simonreed.co"], { hoistDir, mode: "no-tunnels" });
+    expect(result.status).toBe(0);
+    const state = readState(hoistDir);
+    expect(state.tunnelId).toBe("mock-tunnel-id");
   });
 
   test("writes config.yml with 404 catch-all", () => {
@@ -126,13 +144,20 @@ describe("hoist init", () => {
     expect(result.stderr).toContain("Usage:");
   });
 
-  test("fails when tunnel not found", () => {
-    const result = runCli(["init", "simonreed.co", "nonexistent-tunnel"], {
+  test("login failure exits 1", () => {
+    const result = runCli(["init", "simonreed.co"], { hoistDir, mode: "login-fail" });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("login failed");
+  });
+
+  test("tunnel create failure exits 1", () => {
+    // no-tunnels list + tunnel-create-fails → create is attempted and fails
+    const result = runCli(["init", "simonreed.co"], {
       hoistDir,
-      mode: "no-tunnels",
+      mode: "tunnel-create-fails",
     });
     expect(result.status).toBe(1);
-    expect(result.stderr).toContain("not found");
+    expect(result.stderr).toContain("Failed to create tunnel");
   });
 });
 
