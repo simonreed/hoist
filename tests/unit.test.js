@@ -2,39 +2,7 @@
 // Run: bun test tests/unit.test.js
 
 import { describe, test, expect } from "bun:test";
-
-// ── Copy of pure functions from cli.js ────────────────────────────────────────
-// These are tested in isolation. When cli.js is ported to TS these will be
-// imported directly.
-
-function parseLogLine(line) {
-  const tsMatch = line.match(/^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z)\s+(\w+)\s+(.+)$/);
-  if (!tsMatch) return null;
-  const [, ts, level, rest] = tsMatch;
-  const time = ts.slice(11, 19);
-  const reqMatch = rest.match(/^(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s+https?:\/\/([^/\s]+)(\/[^\s]*)?/);
-  if (reqMatch) {
-    return { type: "req", time, method: reqMatch[1], host: reqMatch[2], path: reqMatch[3] || "/" };
-  }
-  const resMatch = rest.match(/^(\d{3})\s+\S+/);
-  if (resMatch) {
-    return { type: "res", time, status: parseInt(resMatch[1], 10) };
-  }
-  return null;
-}
-
-function buildConfigYaml(state) {
-  const credentialsFile = `/home/user/.hoist/${state.tunnelId}.json`;
-  if (state.mappings.length === 0) {
-    return `tunnel: ${state.tunnelId}\ncredentials-file: ${credentialsFile}\n\ningress:\n  - service: http_status:404\n`;
-  }
-  const ingressLines = state.mappings
-    .map(({ subdomain, port }) =>
-      `  - hostname: ${subdomain}.${state.domain}\n    service: http://localhost:${port}`
-    )
-    .join("\n");
-  return `tunnel: ${state.tunnelId}\ncredentials-file: ${credentialsFile}\n\ningress:\n${ingressLines}\n  - service: http_status:404\n`;
-}
+import { parseLogLine, buildConfigYaml } from "../src/cli.ts";
 
 // ── parseLogLine ──────────────────────────────────────────────────────────────
 

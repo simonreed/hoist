@@ -10,7 +10,8 @@ import { tmpdir } from "node:os";
 // ── Test environment setup ────────────────────────────────────────────────────
 
 const MOCK_CF = join(import.meta.dir, "fixtures/cloudflared-mock");
-const CLI = join(import.meta.dir, "../src/cli.js");
+const CLI = join(import.meta.dir, "../src/cli.ts");
+const BUN = process.execPath; // path to the bun binary running this test
 
 function tempDir() {
   const dir = join(tmpdir(), `hoist-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -20,7 +21,7 @@ function tempDir() {
 
 function runCli(args, { hoistDir, mode = "success", env = {} } = {}) {
   return spawnSync(
-    "node",
+    BUN,
     [CLI, ...args],
     {
       encoding: "utf8",
