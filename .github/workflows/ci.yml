@@ -15,4 +15,5 @@ jobs:
         with:
           bun-version: latest
       - run: bun install
+      - run: sh scripts/setup.sh
       - run: bun test
