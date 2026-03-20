@@ -9,6 +9,7 @@ import {
   renameSync,
   openSync,
   chmodSync,
+  copyFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -168,27 +169,31 @@ function ensureDns(state: State, subdomain: string): void {
 
   const result = spawnSync(
     CLOUDFLARED,
-    ["tunnel", "route", "dns", state.tunnelName, hostname],
+    ["tunnel", "route", "dns", "--overwrite-dns", state.tunnelName, hostname],
     { encoding: "utf8" }
   );
 
   if (result.status !== 0) {
-    // cloudflared returns non-zero for "already exists" (our own record) — treat as non-fatal
-    // BUT "already exists with a different value" means a conflicting record — treat as fatal
-    const output = (result.stdout + result.stderr).toLowerCase();
-    const isOwnRecord =
-      (output.includes("already") || output.includes("exists")) &&
-      !output.includes("different");
-    if (isOwnRecord) {
-      console.log("exists");
-    } else {
-      console.log("failed");
-      console.error(result.stderr || result.stdout);
-      process.exit(1);
-    }
-  } else {
-    console.log("ok");
+    console.log("failed");
+    console.error(result.stderr || result.stdout);
+    process.exit(1);
   }
+
+  // cloudflared returns 0 even when the record exists and points to a different tunnel.
+  // Detect this by checking for a tunnelID in the output that doesn't match ours.
+  const output = result.stdout + result.stderr;
+  const tunnelMatch = output.match(/tunnelID=([a-f0-9-]+)/i);
+  if (tunnelMatch && tunnelMatch[1] !== state.tunnelId) {
+    console.log("conflict");
+    console.error(
+      `\n  ${hostname} already routes to a different tunnel (${tunnelMatch[1].slice(0, 8)}...).` +
+      `\n  Run this to adopt that tunnel:\n` +
+      `\n    hoist adopt ${tunnelMatch[1]}\n`
+    );
+    process.exit(1);
+  }
+
+  console.log("ok");
 }
 
 // ── Process management ────────────────────────────────────────────────────────
@@ -362,16 +367,21 @@ function cmdInit(args: string[]): void {
     process.exit(1);
   }
 
-  // Step 1: Cloudflare login
+  // Step 1: Cloudflare login (skip if already logged in)
   console.log("Step 1/3: Cloudflare login");
-  const loginResult = spawnSync(
-    CLOUDFLARED,
-    ["tunnel", "login"],
-    { stdio: "inherit" }
-  );
-  if (loginResult.status !== 0) {
-    console.error("Login failed.");
-    process.exit(1);
+  const certPath = join(homedir(), ".cloudflared", "cert.pem");
+  if (existsSync(certPath)) {
+    console.log("  Already logged in");
+  } else {
+    const loginResult = spawnSync(
+      CLOUDFLARED,
+      ["tunnel", "login"],
+      { stdio: "inherit" }
+    );
+    if (loginResult.status !== 0) {
+      console.error("Login failed.");
+      process.exit(1);
+    }
   }
 
   // Step 2: Find or create the tunnel
@@ -608,6 +618,80 @@ function cmdLogs(): void {
   });
 }
 
+// Adopts an existing Cloudflare tunnel by ID or name, replacing the current
+// hoist tunnel. Use when DNS already points to a different tunnel.
+function cmdAdopt(args: string[]): void {
+  const [tunnelRef] = args;
+  if (!tunnelRef) {
+    console.error("Usage: hoist adopt <tunnel-id-or-name>");
+    process.exit(1);
+  }
+
+  const currentState = loadState();
+  if (!currentState) {
+    console.error("No domain configured. Run: hoist init <domain>");
+    process.exit(1);
+  }
+
+  console.log(`Looking up tunnel "${tunnelRef}"...`);
+
+  const listResult = spawnSync(
+    CLOUDFLARED,
+    ["tunnel", "list", "--output", "json"],
+    { encoding: "utf8" }
+  );
+
+  if (listResult.status !== 0) {
+    console.error("Failed to list tunnels.");
+    console.error(listResult.stderr || listResult.stdout);
+    process.exit(1);
+  }
+
+  const tunnels = JSON.parse(listResult.stdout) as TunnelInfo[];
+  const tunnel = tunnels.find(
+    (t) => t.id === tunnelRef || t.id.startsWith(tunnelRef) || t.name === tunnelRef
+  );
+
+  if (!tunnel) {
+    console.error(`Tunnel "${tunnelRef}" not found.`);
+    console.error(`Your tunnels: ${tunnels.map((t) => `${t.name} (${t.id.slice(0, 8)}...)`).join(", ")}`);
+    process.exit(1);
+  }
+
+  // Copy credentials from ~/.cloudflared if present
+  const srcCreds = join(homedir(), ".cloudflared", `${tunnel.id}.json`);
+  const dstCreds = join(APP_DIR, `${tunnel.id}.json`);
+  if (existsSync(srcCreds) && !existsSync(dstCreds)) {
+    mkdirSync(APP_DIR, { recursive: true });
+    copyFileSync(srcCreds, dstCreds);
+  }
+
+  if (!existsSync(dstCreds)) {
+    console.error(`Credentials not found at ${dstCreds}`);
+    console.error(`Copy them manually: cp ~/.cloudflared/${tunnel.id}.json ${dstCreds}`);
+    process.exit(1);
+  }
+
+  const state: State = {
+    domain: currentState.domain,
+    tunnelName: tunnel.name,
+    tunnelId: tunnel.id,
+    mappings: currentState.mappings,
+  };
+
+  saveState(state);
+  writeConfig(state);
+
+  if (currentState.mappings.length > 0) {
+    startTunnel(state);
+    console.log(`Adopted tunnel: ${tunnel.name} (${tunnel.id.slice(0, 8)}...)`);
+    console.log(`Restarted with ${currentState.mappings.length} existing mapping(s).`);
+  } else {
+    console.log(`Adopted tunnel: ${tunnel.name} (${tunnel.id.slice(0, 8)}...)`);
+    console.log(`Run: hoist <subdomain> <port>`);
+  }
+}
+
 function printHelp(): void {
   console.log(`hoist <subdomain> <port>   expose localhost:<port> at https://<subdomain>.<domain>
 hoist rm <subdomain>       remove a mapping
@@ -617,7 +701,8 @@ hoist stop                 stop the tunnel process
 hoist run                  run tunnel in foreground (for debugging)
 hoist watch                live request view with tunnel header (like ngrok)
 hoist logs                 plain request log tail
-hoist init <domain>         one-time setup: login + create tunnel + configure`);
+hoist init <domain>        one-time setup: login + create tunnel + configure
+hoist adopt <tunnel-id>    switch to an existing tunnel (use when DNS conflict on init)`);
 }
 
 // ── Entry point ───────────────────────────────────────────────────────────────
@@ -628,7 +713,7 @@ if (import.meta.main) {
   const [first, ...rest] = process.argv.slice(2);
 
   const COMMANDS = new Set([
-    "init", "add", "rm", "ls", "logs", "watch", "status", "stop", "run", "help",
+    "init", "adopt", "add", "rm", "ls", "logs", "watch", "status", "stop", "run", "help",
   ]);
 
   if (!first) {
@@ -638,6 +723,7 @@ if (import.meta.main) {
   } else {
     switch (first) {
       case "init":   cmdInit(rest);  break;
+      case "adopt":  cmdAdopt(rest); break;
       case "add":    cmdShare(rest); break;
       case "rm":     cmdRm(rest);    break;
       case "ls":     cmdLs();        break;
